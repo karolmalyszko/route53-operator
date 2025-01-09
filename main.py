@@ -1,20 +1,19 @@
 import boto3
-import json, requests, logging
+import json, requests, logging, os
 
 logging.basicConfig(
     format="{asctime} - {levelname} - {message}",
     style="{",
     datefmt="%d-%m-%Y %H:%M",
-    level=logging.DEBUG,
-    # level=logging.INFO,
+    # level=logging.DEBUG,
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
 client = boto3.client('route53')
 
-domainName = 'jaskiniaops.com'
-# subdomainList = ['photos', 'nxt']
-subdomainList = ['test']
+domainName = os.environ.get("DOMAIN_NAME")
+subdomainList = os.environ.get("SUBDOMAINS").split(",")
 
 def getRecordValue( subdomain ):
     logger.debug("Getting DNS record value.")
@@ -80,11 +79,12 @@ def updateRecordValue( subdomain, newIp ):
         )
         changeId = json.dumps(rsp["ChangeInfo"]["Id"]).strip("\"")
         changeStatus = json.dumps(rsp["ChangeInfo"]["Status"]).strip("\"")
+        status = True
     except:
-        logger.error("Changing DNS record for {} failed!".format(subdomain))
+        logger.error("Changing DNS record for '{}' failed!".format(subdomain))
 
     if status:
-        logger.debug("DNS record for {} updated".format(subdomain))
+        logger.debug("DNS record for '{}' updated".format(subdomain))
         return True, changeId, changeStatus
     else:
         return False, None, None
@@ -108,10 +108,16 @@ def getCurrentIP():
 status, id = getHostedZoneID(domainName)
 if status:
     hostedZoneID = id
+else:
+    logger.error("Getting hosted zone id failed. Exiting")
+    exit(1)
 
 status, ip = getCurrentIP()
 if status:
     currentIp = ip
+else:
+    logger.error("Getting current ip failed. Exiting")
+    exit(2)
 
 for subdomain in subdomainList:
     logger.debug("Checking for differences")
@@ -119,29 +125,14 @@ for subdomain in subdomainList:
     if status:
         if remoteIp != currentIp:
             logger.info("Changes found for '{}' subdomain".format(subdomain))
-            changeID, changeStatus = updateRecordValue(subdomain, currentIp)
+            status, changeID, changeStatus = updateRecordValue(subdomain, currentIp)
+            if not status:
+                logger.error("Updating DNS record failed. Exiting")
+                exit(3)
         else: logger.info("No changes for '{}' subdomain found".format(subdomain))
-    # status.append(partial)
-
-# photosIp = getRecordValue( "photos" )
-# status = ["photos", photosIp]
-# print(status)
-
-# for entity in status:
-#     if entity[2] != entity[1]:
-#         print("changing {} ip entry from {} to {}".format(entity[0], entity[1], entity[2]))
-#     else:
-#         print("No changes required for {} subdomain".format(entity[0]))
-
-# id, status = updateRecordValue( "test", currentIp )
-# # if status != "PENDING" || status != "INSYNC" :
-# #     print("error")
-# # else:
-# response = client.get_change(Id=id)
-# # print(json.dumps(response, indent=4))
-# print(response)
+    else:
+        logger.error("Something went wrong retrieving current record value. Exiting")
+        exit(4)
 
 # # TODO
 # dodać powiadamianie mailowe za pomocą AWS SES
-# nazwa domeny podawana jako zmienna środowiskowa / z poziomu pliku konfiguracyjnego
-# subdomeny podawane jako zmienne środowiskowe / z poziomu pliku konfiguracyjnego
