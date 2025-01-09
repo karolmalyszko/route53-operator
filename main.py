@@ -1,12 +1,22 @@
 import boto3
-import json, requests
+import json, requests, logging
+
+logging.basicConfig(
+    format="{asctime} - {levelname} - {message}",
+    style="{",
+    datefmt="%d-%m-%Y %H:%M",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 client = boto3.client('route53')
 
 domainName = 'jaskiniaops.com'
-subdomainList = ['photos', 'nxt']
+# subdomainList = ['photos', 'nxt']
+subdomainList = ['test']
 
 def getRecordValue( subdomain ):
+    logger.debug("Getting DNS record value.")
     rsp = client.list_resource_record_sets(
         HostedZoneId=hostedZoneID,
         StartRecordName="{}.{}".format(subdomain, domainName),
@@ -19,6 +29,7 @@ def getRecordValue( subdomain ):
     # print(ip)
 
 def getHostedZoneID( zoneName ):
+    logger.debug("Getting hosted DNS zone ID for further operations")
     rsp = client.list_hosted_zones_by_name(
         DNSName=zoneName,
         MaxItems='1'
@@ -27,7 +38,7 @@ def getHostedZoneID( zoneName ):
     return json.dumps(rsp["HostedZones"][0]["Id"]).split("/", 2)[2].strip("\"")
 
 def updateRecordValue( subdomain, newIp ):
-    # print("Modding {} record to {}".format(subdomain, newIp))
+    logger.info("Changing '{}' record to {}".format(subdomain, newIp))
     rsp = client.change_resource_record_sets(
         ChangeBatch={
             'Changes': [
@@ -57,9 +68,10 @@ hostedZoneID = getHostedZoneID( domainName )
 currentIp = requests.get('https://ifconfig.me').text
 
 for subdomain in subdomainList:
+    logger.debug("Checking for differences")
     remoteIp = getRecordValue( subdomain )
     if remoteIp != currentIp:
-        print("Changing {} ip entry from {} to {}".format(subdomain, remoteIp, currentIp))
+        logger.info("Changes found for '{}' subdomain".format(subdomain))
         id, status = updateRecordValue(subdomain, currentIp)
     # status.append(partial)
 
