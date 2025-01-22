@@ -5,8 +5,7 @@ logging.basicConfig(
     format="{asctime} - {levelname} - {message}",
     style="{",
     datefmt="%d-%m-%Y %H:%M",
-    # level=logging.DEBUG,
-    level=logging.INFO,
+    level=os.environ.get("LOGLEVEL", "INFO")
 )
 logger = logging.getLogger(__name__)
 
