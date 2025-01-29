@@ -1,5 +1,6 @@
 import boto3
 import json, requests, logging, os
+from botocore.exceptions import ClientError
 
 logging.basicConfig(
     format="{asctime} - {levelname} - {message}",
@@ -14,7 +15,7 @@ client = boto3.client('route53')
 domainName = os.environ.get("DOMAIN_NAME")
 subdomainList = os.environ.get("SUBDOMAINS").split(",")
 
-def getRecordValue( subdomain ):
+def getRecordValue( subdomain, hostedZoneID ):
     logger.debug("Getting DNS record value.")
     status = False
     try:
@@ -52,7 +53,7 @@ def getHostedZoneID( zoneName ):
     else:
         return False, None
 
-def updateRecordValue( subdomain, newIp ):
+def updateRecordValue( subdomain, newIp, hostedZoneID ):
     logger.info("Changing '{}' record to {}".format(subdomain, newIp))
     status = False
     try:
@@ -103,35 +104,90 @@ def getCurrentIP():
     else:
         return False, None
 
-#======== start of script execution
-status, id = getHostedZoneID(domainName)
-if status:
-    hostedZoneID = id
-else:
-    logger.error("Getting hosted zone id failed. Exiting")
-    exit(1)
+def emailNotify():
+    sender = "Automated notifier <noreply@jaskiniaops.com>"
+    recipient = "karol.malyszko@gmail.com"
+    awsRegion = "us-east-1"
+    subject = "Automated notification for dnsOperator job"
+    charset = "UTF-8"
+    bodyText = "Notification : dnsOperator has found and successfully updated new public IP address for tools running in Sukienna. All should be good in a little while."
+    bodyHtml = """<html>
+<head></head>
+<body>
+  <h1>dnsOperator has done it's job.</h1>
+  <p>
+    <b>dnsOperator</b> has found and successfully updated new public IP address for tools running in Sukienna. All should be good in a little while.
+  </p>
+</body>
+</html>
+            """
 
-status, ip = getCurrentIP()
-if status:
-    currentIp = ip
-else:
-    logger.error("Getting current ip failed. Exiting")
-    exit(2)
+    sesClient = boto3.client('ses',region_name=awsRegion)
 
-for subdomain in subdomainList:
-    logger.debug("Checking for differences")
-    status, remoteIp = getRecordValue(subdomain)
-    if status:
-        if remoteIp != currentIp:
-            logger.info("Changes found for '{}' subdomain".format(subdomain))
-            status, changeID, changeStatus = updateRecordValue(subdomain, currentIp)
-            if not status:
-                logger.error("Updating DNS record failed. Exiting")
-                exit(3)
-        else: logger.info("No changes for '{}' subdomain found".format(subdomain))
+    try:
+        #Provide the contents of the email.
+        response = sesClient.send_email(
+            Destination={
+                'ToAddresses': [
+                    recipient,
+                ],
+            },
+            Message={
+                'Body': {
+                    'Html': {
+                        'Charset': charset,
+                        'Data': bodyHtml,
+                    },
+                    'Text': {
+                        'Charset': charset,
+                        'Data': bodyText,
+                    },
+                },
+                'Subject': {
+                    'Charset': charset,
+                    'Data': subject,
+                },
+            },
+            Source=sender,
+        )
+    except ClientError as e:
+        logger.error(e.response['Error']['Message'])
+        exit(5)
     else:
-        logger.error("Something went wrong retrieving current record value. Exiting")
-        exit(4)
+        logger.info("Email notification sent!"),
+        logger.debug(response['MessageId'])
 
-# # TODO
-# dodać powiadamianie mailowe za pomocą AWS SES
+def main():
+    status, id = getHostedZoneID(domainName)
+    if status:
+        hostedZoneID = id
+    else:
+        logger.error("Getting hosted zone id failed. Exiting")
+        exit(1)
+
+    status, ip = getCurrentIP()
+    if status:
+        currentIp = ip
+    else:
+        logger.error("Getting current ip failed. Exiting")
+        exit(2)
+
+    for subdomain in subdomainList:
+        logger.debug("Checking for differences")
+        status, remoteIp = getRecordValue(subdomain, hostedZoneID)
+        if status:
+            if remoteIp != currentIp:
+                logger.info("Changes found for '{}' subdomain".format(subdomain))
+                status, changeID, changeStatus = updateRecordValue(subdomain, currentIp, hostedZoneID)
+                if not status:
+                    logger.error("Updating DNS record failed. Exiting")
+                    exit(3)
+                else:
+                    emailNotify()
+            else: logger.info("No changes for '{}' subdomain found".format(subdomain))
+        else:
+            logger.error("Something went wrong retrieving current record value. Exiting")
+            exit(4)
+
+if __name__ == '__main__':
+    main()
